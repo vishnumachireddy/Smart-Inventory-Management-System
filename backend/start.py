@@ -9,26 +9,30 @@ try:
 except Exception:
     pass
 
-# Ensure current directory is in sys.path
+# Suppress multiprocessing worker spawning by Render's WEB_CONCURRENCY=1
+os.environ.pop("WEB_CONCURRENCY", None)
+
 curr_dir = os.path.dirname(os.path.abspath(__file__))
 if curr_dir not in sys.path:
     sys.path.insert(0, curr_dir)
 
 if __name__ == "__main__":
-    raw_port = os.environ.get("PORT", "8000")
+    raw_port = os.environ.get("PORT", "10000")
     try:
         port = int(raw_port)
     except (ValueError, TypeError):
-        print(f"[StockSense] Warning: could not parse PORT '{raw_port}' as int. Falling back to 8000.", flush=True)
-        port = 8000
+        print(f"[StockSense] Warning: could not parse PORT '{raw_port}' as int. Falling back to 10000.", flush=True)
+        port = 10000
 
     host = os.environ.get("HOST", "0.0.0.0")
-    print(f"[StockSense] Starting production server on {host}:{port} (PORT={raw_port})...", flush=True)
+    print(f"[StockSense] Booting server on {host}:{port}...", flush=True)
 
     try:
+        from app.main import app
         import uvicorn
+        print(f"[StockSense] Application module loaded successfully. Starting Uvicorn in-process...", flush=True)
         uvicorn.run(
-            "app.main:app",
+            app,
             host=host,
             port=port,
             proxy_headers=True,
