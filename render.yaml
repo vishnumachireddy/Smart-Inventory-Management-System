@@ -5,9 +5,11 @@ services:
     region: ohio # Close to Neon PostgreSQL (Ohio us-east-2) for sub-5ms DB latency
     plan: free
     buildCommand: pip install -r backend/requirements.txt && alembic upgrade head
-    startCommand: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    startCommand: python start.py
     healthCheckPath: /health
     envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: DATABASE_URL

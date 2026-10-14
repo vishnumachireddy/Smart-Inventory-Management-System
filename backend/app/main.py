@@ -131,3 +131,10 @@ app.include_router(analytics.router, prefix=f"{api_v1}/analytics", tags=["Analyt
 app.include_router(notifications.router, prefix=f"{api_v1}/notifications", tags=["Notifications & Email"])
 app.include_router(app_settings.router, prefix=f"{api_v1}/settings", tags=["Settings"])
 app.include_router(ws.router, prefix=api_v1, tags=["WebSockets"])
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    uvicorn.run(app, host=host, port=port)
