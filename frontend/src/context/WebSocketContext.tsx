@@ -48,11 +48,18 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     try {
-      const isSecure = window.location.protocol === 'https:';
-      const wsProtocol = isSecure ? 'wss:' : 'ws:';
-      // In Vite dev mode with proxy, window.location.host routes via port 5173
-      const wsHost = window.location.host;
-      const wsUrl = `${wsProtocol}//${wsHost}/api/v1/ws?token=${encodeURIComponent(token)}`;
+      let wsUrl: string;
+      const apiUrl = import.meta.env.VITE_API_URL;
+      if (apiUrl && apiUrl.startsWith('http')) {
+        const urlObj = new URL(apiUrl);
+        const protocol = urlObj.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = `${protocol}//${urlObj.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
+      } else {
+        const isSecure = window.location.protocol === 'https:';
+        const wsProtocol = isSecure ? 'wss:' : 'ws:';
+        const wsHost = window.location.host;
+        wsUrl = `${wsProtocol}//${wsHost}/api/v1/ws?token=${encodeURIComponent(token)}`;
+      }
 
       const ws = new WebSocket(wsUrl);
       socketRef.current = ws;
