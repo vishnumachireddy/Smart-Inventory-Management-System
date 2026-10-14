@@ -94,6 +94,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Root and Health checks
 @app.get("/", tags=["Root"])
+@app.head("/", tags=["Root"])
 def root():
     return {
         "app": settings.PROJECT_NAME,
@@ -106,7 +107,9 @@ def root():
 
 
 @app.get("/health", tags=["Health"])
+@app.head("/health", tags=["Health"])
 @app.get(f"{settings.API_V1_STR}/health", tags=["Health"])
+@app.head(f"{settings.API_V1_STR}/health", tags=["Health"])
 def health_check():
     is_db_connected, db_msg = check_database_health()
     return {
