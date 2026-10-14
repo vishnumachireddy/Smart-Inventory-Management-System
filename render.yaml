@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: stocksense-backend
+    runtime: python
+    region: ohio # Close to Neon PostgreSQL (Ohio us-east-2) for sub-5ms DB latency
+    plan: free
+    buildCommand: pip install -r backend/requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DATABASE_URL
+        sync: false # Set manually in Render dashboard with your Neon connection string
+      - key: SECRET_KEY
+        generateValue: true
+      - key: CORS_ORIGINS
+        value: "*" # Or your production frontend URL (e.g. https://your-frontend.vercel.app)
+      - key: APP_TIMEZONE
+        value: Asia/Kolkata
+      - key: INVENTORY_CHECK_TIME
+        value: "08:00"
