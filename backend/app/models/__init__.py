@@ -200,16 +200,95 @@ class Alert(Base):
     id = Column(Integer, primary_key=True, index=True)
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True)
     batch_id = Column(Integer, ForeignKey("inventory_batches.id", ondelete="CASCADE"), nullable=True, index=True)
-    alert_type = Column(String(50), index=True, nullable=False)  # low_stock, near_expiry, expired
+    alert_type = Column(String(50), index=True, nullable=False)  # low_stock, out_of_stock, near_expiry, expired
     severity = Column(String(50), default="warning", nullable=False)  # info, warning, critical
     message = Column(Text, nullable=False)
+    relevant_stock_quantity = Column(Float, nullable=True)
+    relevant_expiry_date = Column(Date, nullable=True)
+    status = Column(String(50), default="active", nullable=False, index=True)  # active, acknowledged, resolved, dismissed
     is_read = Column(Boolean, default=False, nullable=False)
     is_resolved = Column(Boolean, default=False, nullable=False)
+    first_detected_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_checked_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    deduplication_key = Column(String(255), unique=True, index=True, nullable=True)
 
     product = relationship("Product", back_populates="alerts")
     batch = relationship("InventoryBatch", back_populates="alerts")
+
+
+InventoryAlert = Alert
+
+
+class NotificationSettings(Base):
+    __tablename__ = "notification_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    shop_id = Column(String(100), default="default_shop", nullable=False, index=True)
+    recipient_emails = Column(Text, default="", nullable=False)
+    enabled = Column(Boolean, default=False, nullable=False)
+    report_frequency = Column(String(50), default="daily", nullable=False)  # daily, weekly, both
+    scheduled_time = Column(String(20), default="08:00", nullable=False)
+    timezone = Column(String(100), default="Asia/Kolkata", nullable=False)
+    categories = Column(String(255), default="near_expiry,low_stock,out_of_stock,sales_summary", nullable=False)
+    include_empty_reports = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    user = relationship("User")
+
+
+class ScheduledJobRun(Base):
+    __tablename__ = "scheduled_job_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_name = Column(String(100), index=True, nullable=False, default="daily_inventory_check")
+    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String(50), default="running", nullable=False, index=True)  # running, success, failed, skipped
+    summary_counts = Column(Text, nullable=True)  # JSON-encoded summary counts
+    error_details = Column(Text, nullable=True)
+
+    email_logs = relationship("EmailDeliveryLog", back_populates="scheduled_run")
+
+
+class EmailDeliveryLog(Base):
+    __tablename__ = "email_delivery_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    report_type = Column(String(100), index=True, nullable=False)  # daily_inventory, weekly_summary, test_email
+    recipient = Column(String(255), nullable=False, index=True)
+    scheduled_run_id = Column(Integer, ForeignKey("scheduled_job_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    idempotency_key = Column(String(255), unique=True, index=True, nullable=False)
+    attempt_count = Column(Integer, default=1, nullable=False)
+    status = Column(String(50), default="queued", nullable=False, index=True)  # queued, attempted, accepted, failed, disabled
+    provider_message_id = Column(String(255), nullable=True)
+    last_attempt_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+    scheduled_run = relationship("ScheduledJobRun", back_populates="email_logs")
+
+
+class DailyInventorySnapshot(Base):
+    __tablename__ = "daily_inventory_snapshots"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reporting_date = Column(Date, unique=True, index=True, nullable=False)
+    near_expiry_count = Column(Integer, default=0, nullable=False)
+    low_stock_count = Column(Integer, default=0, nullable=False)
+    out_of_stock_count = Column(Integer, default=0, nullable=False)
+    total_stock_value = Column(Numeric(12, 2), default=0.00, nullable=False)
+    sales_count = Column(Integer, default=0, nullable=False)
+    revenue = Column(Numeric(12, 2), default=0.00, nullable=False)
+    gross_profit = Column(Numeric(12, 2), default=0.00, nullable=False)
+    summary_text = Column(Text, nullable=True)
+    generation_timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class ForecastRecord(Base):

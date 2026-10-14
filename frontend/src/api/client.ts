@@ -17,6 +17,12 @@ import {
   TopProductPoint,
   AppSetting,
   User,
+  InventorySummaryResponse,
+  NotificationSettings,
+  EmailDeliveryLog,
+  ScheduledJobRun,
+  DailySnapshot,
+  DashboardBundleResponse,
 } from '../types';
 
 const api = axios.create({
@@ -142,19 +148,41 @@ export const apiClient = {
   getReorderRecommendations: (params?: any) =>
     api.get<ReorderRecommendation[]>('/recommendations/reorder', { params }),
 
-  // Alerts
+  // Alerts & Smart Summary
   getAlerts: (params?: any) =>
     api.get<Alert[]>('/alerts', { params }),
+  getInventorySummary: (nearExpiryDays?: number) =>
+    api.get<InventorySummaryResponse>('/alerts/inventory-summary', { params: { near_expiry_days: nearExpiryDays } }),
   reconcileAlerts: () =>
     api.post('/alerts/reconcile'),
   markAlertRead: (id: number) =>
     api.patch<Alert>(`/alerts/${id}/read`),
+  markAllAlertsRead: () =>
+    api.post('/alerts/mark-all-read'),
   markAlertResolved: (id: number) =>
     api.patch<Alert>(`/alerts/${id}/resolve`),
+  runDailyCheck: (force = true) =>
+    api.post('/alerts/run-daily-check', null, { params: { force } }),
+  getDailySnapshots: (limit = 30) =>
+    api.get<DailySnapshot[]>('/alerts/snapshots', { params: { limit } }),
+  getJobRuns: (limit = 20) =>
+    api.get<ScheduledJobRun[]>('/alerts/job-runs', { params: { limit } }),
+
+  // Notifications & Scheduled Email
+  getNotificationSettings: () =>
+    api.get<NotificationSettings>('/notifications/settings'),
+  updateNotificationSettings: (data: Partial<NotificationSettings>) =>
+    api.put<NotificationSettings>('/notifications/settings', data),
+  sendTestEmail: (recipient_email: string) =>
+    api.post<{ success: boolean; message: string; log_id?: number }>('/notifications/test-email', { recipient_email }),
+  getDeliveryLogs: (limit = 50) =>
+    api.get<EmailDeliveryLog[]>('/notifications/delivery-logs', { params: { limit } }),
 
   // Dashboard & Analytics
   getDashboardSummary: () =>
     api.get<DashboardKPIs>('/dashboard/summary'),
+  getDashboardBundle: (trendDays = 30) =>
+    api.get<DashboardBundleResponse>('/dashboard/bundle', { params: { trend_days: trendDays } }),
   getSalesAnalytics: (days?: number) =>
     api.get<SalesTrendPoint[]>('/analytics/sales', { params: { days } }),
   getCategoryAnalytics: () =>

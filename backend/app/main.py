@@ -21,7 +21,11 @@ from app.api.v1 import (
     dashboard,
     analytics,
     settings as app_settings,
+    notifications,
+    ws,
 )
+from app.services.daily_scheduler_service import start_scheduler_loop
+import asyncio
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,8 +46,11 @@ async def lifespan(app: FastAPI):
             f"Database connection warning on startup: {msg}\n"
             f"Ensure DATABASE_URL is configured with your Neon PostgreSQL connection string in .env"
         )
+    # Launch background daily inventory check scheduler
+    scheduler_task = asyncio.create_task(start_scheduler_loop())
     yield
     # Shutdown logic
+    scheduler_task.cancel()
     logger.info("Shutting down StockSense Backend...")
 
 
@@ -77,7 +84,19 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Health checks
+# Root and Health checks
+@app.get("/", tags=["Root"])
+def root():
+    return {
+        "app": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "description": "StockSense API Backend is operational",
+        "documentation": "/docs",
+        "frontend_url": "http://localhost:5173",
+        "status": "online"
+    }
+
+
 @app.get("/health", tags=["Health"])
 @app.get(f"{settings.API_V1_STR}/health", tags=["Health"])
 def health_check():
@@ -109,4 +128,6 @@ app.include_router(recommendations.router, prefix=f"{api_v1}/recommendations", t
 app.include_router(alerts.router, prefix=f"{api_v1}/alerts", tags=["Alerts"])
 app.include_router(dashboard.router, prefix=f"{api_v1}/dashboard", tags=["Dashboard"])
 app.include_router(analytics.router, prefix=f"{api_v1}/analytics", tags=["Analytics"])
+app.include_router(notifications.router, prefix=f"{api_v1}/notifications", tags=["Notifications & Email"])
 app.include_router(app_settings.router, prefix=f"{api_v1}/settings", tags=["Settings"])
+app.include_router(ws.router, prefix=api_v1, tags=["WebSockets"])

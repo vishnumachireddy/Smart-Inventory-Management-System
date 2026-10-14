@@ -1,8 +1,8 @@
 from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc, asc
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_, desc, asc, func
 
 from app.core.database import get_db
 from app.core.deps import require_staff_or_owner, require_shop_owner
@@ -16,6 +16,7 @@ from app.schemas import (
 )
 from app.services.inventory_service import InventoryService
 from app.services.alert_service import AlertService
+from app.services.cache_service import data_cache
 
 router = APIRouter()
 
@@ -71,44 +72,101 @@ def list_products(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff_or_owner)
 ):
-    """Lists products with calculated dynamic stock levels and multi-criteria filters."""
-    query = db.query(Product).filter(Product.is_active == True)
+    """Lists products with single-pass bulk batch stock aggregation and high-speed in-memory caching."""
+    cache_key = "products_all_enriched"
+    enriched: Optional[List[ProductResponse]] = data_cache.get(cache_key)
 
-    if search:
-        search_filter = f"%{search.strip()}%"
-        query = query.filter(
-            or_(
-                Product.name.ilike(search_filter),
-                Product.sku.ilike(search_filter),
-                Product.barcode.ilike(search_filter)
+    if enriched is None:
+        today = date.today()
+        # 1. Fetch all products with category and supplier joined in 1 single query
+        products = (
+            db.query(Product)
+            .options(
+                joinedload(Product.category),
+                joinedload(Product.supplier)
             )
+            .filter(Product.is_active == True)
+            .all()
         )
 
+        # 2. Bulk aggregate eligible stock per product in 1 query
+        batch_stocks = (
+            db.query(
+                InventoryBatch.product_id,
+                func.coalesce(func.sum(InventoryBatch.current_quantity), 0).label("stock")
+            )
+            .filter(
+                InventoryBatch.current_quantity > 0,
+                InventoryBatch.status == "active",
+                (InventoryBatch.expiry_date == None) | (InventoryBatch.expiry_date >= today)
+            )
+            .group_by(InventoryBatch.product_id)
+            .all()
+        )
+        stock_map = {row.product_id: float(row.stock) for row in batch_stocks}
+
+        # 3. Construct responses in-memory
+        enriched = []
+        for p in products:
+            total_stock = stock_map.get(p.id, 0.0)
+            if total_stock == 0:
+                p_status = "out_of_stock"
+            elif total_stock <= p.reorder_threshold:
+                p_status = "low_stock"
+            else:
+                p_status = "in_stock"
+
+            enriched.append(
+                ProductResponse(
+                    id=p.id,
+                    name=p.name,
+                    sku=p.sku,
+                    barcode=p.barcode,
+                    category_id=p.category_id,
+                    supplier_id=p.supplier_id,
+                    description=p.description,
+                    unit=p.unit,
+                    purchase_cost=p.purchase_cost,
+                    selling_price=p.selling_price,
+                    reorder_threshold=p.reorder_threshold,
+                    is_active=p.is_active,
+                    created_at=p.created_at,
+                    updated_at=p.updated_at,
+                    total_stock=total_stock,
+                    category_name=p.category.name if p.category else None,
+                    supplier_name=p.supplier.name if p.supplier else None,
+                    stock_status=p_status
+                )
+            )
+        data_cache.set(cache_key, enriched, ttl_seconds=30)
+
+    # In-memory filtering & sorting
+    results = list(enriched)
+
+    if search:
+        s = search.strip().lower()
+        results = [
+            p for p in results
+            if s in p.name.lower() or s in p.sku.lower() or (p.barcode and s in p.barcode.lower())
+        ]
+
     if category_id:
-        query = query.filter(Product.category_id == category_id)
+        results = [p for p in results if p.category_id == category_id]
 
-    today = date.today()
-    products = query.all()
-
-    # Enrich stock records
-    enriched = [enrich_product_response(p, db, today) for p in products]
-
-    # Filter by dynamic stock status if requested
     if stock_status:
-        enriched = [p for p in enriched if p.stock_status == stock_status]
+        results = [p for p in results if p.stock_status == stock_status]
 
-    # Sort
     reverse = (sort_order.lower() == "desc")
     if sort_by == "stock":
-        enriched.sort(key=lambda x: x.total_stock, reverse=reverse)
+        results.sort(key=lambda x: x.total_stock, reverse=reverse)
     elif sort_by == "price":
-        enriched.sort(key=lambda x: x.selling_price, reverse=reverse)
+        results.sort(key=lambda x: x.selling_price, reverse=reverse)
     elif sort_by == "sku":
-        enriched.sort(key=lambda x: x.sku.lower(), reverse=reverse)
+        results.sort(key=lambda x: x.sku.lower(), reverse=reverse)
     else:
-        enriched.sort(key=lambda x: x.name.lower(), reverse=reverse)
+        results.sort(key=lambda x: x.name.lower(), reverse=reverse)
 
-    return enriched[skip: skip + limit]
+    return results[skip: skip + limit]
 
 
 @router.post("", response_model=ProductResponse)
@@ -132,6 +190,7 @@ def create_product(
 
     # Reconcile alerts for newly created product
     AlertService.reconcile_all_alerts(db)
+    data_cache.invalidate("products_all_enriched")
 
     return enrich_product_response(product, db, date.today())
 
@@ -143,7 +202,10 @@ def get_product_detail(
     current_user: User = Depends(require_staff_or_owner)
 ):
     """Retrieves product details along with its individual inventory batches."""
-    product = db.query(Product).filter(Product.id == product_id).first()
+    product = db.query(Product).options(
+        joinedload(Product.category),
+        joinedload(Product.supplier)
+    ).filter(Product.id == product_id).first()
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
@@ -208,6 +270,7 @@ def update_product(
     db.refresh(product)
 
     AlertService.reconcile_all_alerts(db)
+    data_cache.invalidate("products_all_enriched")
     return enrich_product_response(product, db, date.today())
 
 
@@ -224,4 +287,5 @@ def delete_product(
 
     product.is_active = False
     db.commit()
+    data_cache.invalidate("products_all_enriched")
     return {"message": f"Product '{product.name}' deactivated successfully"}

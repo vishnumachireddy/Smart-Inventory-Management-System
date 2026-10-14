@@ -110,10 +110,17 @@ export const Register: React.FC = () => {
             </button>
           </form>
 
-          <div className="mt-6 text-center">
-            <Link to="/login" className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-              Already have an account? Sign in here
-            </Link>
+          <div className="mt-6 text-center space-y-2">
+            <div>
+              <Link to="/login" className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                Already have an account? Sign in here
+              </Link>
+            </div>
+            <div>
+              <Link to="/home" className="text-xs text-slate-500 hover:text-slate-800 font-medium">
+                &larr; Back to Public Showcase &amp; Features
+              </Link>
+            </div>
           </div>
         </div>
       </div>

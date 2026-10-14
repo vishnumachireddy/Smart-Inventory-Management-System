@@ -29,11 +29,25 @@ class Settings(BaseSettings):
     ]
 
     # Inventory & Expiry Business Defaults
-    DEFAULT_NEAR_EXPIRY_DAYS: int = 30
+    DEFAULT_NEAR_EXPIRY_DAYS: int = 7
     DEFAULT_LEAD_TIME_DAYS: int = 7
     DEFAULT_SAFETY_STOCK_FACTOR: float = 1.5
     CURRENCY_CODE: str = "INR"
     CURRENCY_SYMBOL: str = "₹"
+
+    # Scheduling & Timezone (Business Timezone: Asia/Kolkata)
+    APP_TIMEZONE: str = "Asia/Kolkata"
+    INVENTORY_CHECK_TIME: str = "08:00"
+    APP_PUBLIC_URL: str = "http://localhost:5173"
+
+    # SMTP Email Configuration
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = "alerts@stocksense.com"
+    SMTP_USE_TLS: bool = True
+    EMAIL_ENABLED: bool = False
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -50,6 +64,12 @@ class Settings(BaseSettings):
         if self.DATABASE_URL.strip() == placeholder:
             return False
         return True
+
+    def get_database_url(self) -> str:
+        url = self.DATABASE_URL.strip()
+        if url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url
 
 
 settings = Settings()

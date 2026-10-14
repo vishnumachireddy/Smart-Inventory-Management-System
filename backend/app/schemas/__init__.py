@@ -422,3 +422,80 @@ class AppSettingResponse(SchemaBase):
 class AppSettingUpdate(BaseModel):
     value: str
     description: Optional[str] = None
+
+
+# --- Smart Inventory Alerts & Notifications Schemas ---
+class InventoryAlertSummaryResponse(BaseModel):
+    generated_at: str
+    timezone: str
+    warning_window_days: int
+    summary: Dict[str, int]
+    near_expiry: List[Dict[str, Any]]
+    low_stock: List[Dict[str, Any]]
+    out_of_stock: List[Dict[str, Any]]
+    expired: List[Dict[str, Any]]
+
+
+class NotificationSettingsResponse(SchemaBase):
+    id: int
+    shop_id: str
+    recipient_emails: str
+    enabled: bool
+    report_frequency: str
+    scheduled_time: str
+    timezone: str
+    categories: str
+    include_empty_reports: bool
+    updated_at: datetime
+
+
+class NotificationSettingsUpdate(BaseModel):
+    recipient_emails: Optional[str] = None
+    enabled: Optional[bool] = None
+    report_frequency: Optional[str] = None
+    scheduled_time: Optional[str] = None
+    timezone: Optional[str] = None
+    categories: Optional[str] = None
+    include_empty_reports: Optional[bool] = None
+
+
+class TestEmailRequest(BaseModel):
+    recipient_email: str
+
+
+class EmailDeliveryLogResponse(SchemaBase):
+    id: int
+    report_type: str
+    recipient: str
+    status: str
+    attempt_count: int
+    provider_message_id: Optional[str] = None
+    last_attempt_at: datetime
+    accepted_at: Optional[datetime] = None
+    failure_reason: Optional[str] = None
+    created_at: datetime
+
+
+class ScheduledJobRunResponse(SchemaBase):
+    id: int
+    job_name: str
+    scheduled_at: datetime
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    status: str
+    summary_counts: Optional[str] = None
+    error_details: Optional[str] = None
+
+
+class DailySnapshotResponse(SchemaBase):
+    id: int
+    reporting_date: date
+    near_expiry_count: int
+    low_stock_count: int
+    out_of_stock_count: int
+    total_stock_value: Decimal
+    sales_count: int
+    revenue: Decimal
+    gross_profit: Decimal
+    summary_text: Optional[str] = None
+    generation_timestamp: datetime

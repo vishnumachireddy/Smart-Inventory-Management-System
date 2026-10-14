@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from app.core.database import get_db
@@ -58,7 +58,10 @@ def list_purchases(
     current_user: User = Depends(require_staff_or_owner)
 ):
     """Lists purchase receipt transactions."""
-    query = db.query(PurchaseReceipt)
+    query = db.query(PurchaseReceipt).options(
+        joinedload(PurchaseReceipt.items).joinedload(PurchaseReceiptItem.product),
+        joinedload(PurchaseReceipt.supplier)
+    )
     if supplier_id:
         query = query.filter(PurchaseReceipt.supplier_id == supplier_id)
 

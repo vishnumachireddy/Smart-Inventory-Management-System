@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, func
 
 from app.core.database import get_db
@@ -15,6 +15,7 @@ from app.schemas import (
 )
 from app.services.sales_service import SalesService
 from app.services.alert_service import AlertService
+from app.core.events import broadcast_live_event
 
 router = APIRouter()
 
@@ -67,7 +68,11 @@ def list_sales(
     current_user: User = Depends(require_staff_or_owner)
 ):
     """Lists sales history with optional date range and status filters."""
-    query = db.query(Sale)
+    query = db.query(Sale).options(
+        joinedload(Sale.items).joinedload(SaleItem.product),
+        joinedload(Sale.items).joinedload(SaleItem.batch),
+        joinedload(Sale.user)
+    )
 
     if start_date:
         query = query.filter(func.date(Sale.created_at) >= start_date)
@@ -97,6 +102,14 @@ def create_sale(
 
         # Trigger alert reconciliation for any low-stock updates
         AlertService.reconcile_all_alerts(db)
+
+        # Broadcast live sale completed event over WebSockets
+        broadcast_live_event("SALE_COMPLETED", {
+            "sale_id": sale.id,
+            "sale_number": sale.sale_number,
+            "total_amount": float(sale.total_amount),
+            "gross_profit": float(sale.gross_profit)
+        })
 
         return enrich_sale_response(sale)
     except ValueError as e:
@@ -139,6 +152,13 @@ def cancel_sale(
         db.refresh(sale)
 
         AlertService.reconcile_all_alerts(db)
+
+        # Broadcast live cancellation event over WebSockets
+        broadcast_live_event("SALE_CANCELLED", {
+            "sale_id": sale.id,
+            "sale_number": sale.sale_number
+        })
+
         return enrich_sale_response(sale)
     except ValueError as e:
         db.rollback()

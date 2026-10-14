@@ -12,6 +12,11 @@ from app.models import (
     PurchaseReceipt,
     PurchaseReceiptItem,
     Alert,
+    InventoryAlert,
+    NotificationSettings,
+    ScheduledJobRun,
+    EmailDeliveryLog,
+    DailyInventorySnapshot,
     ForecastRecord,
     AppSetting,
 )
@@ -29,6 +34,11 @@ __all__ = [
     "PurchaseReceipt",
     "PurchaseReceiptItem",
     "Alert",
+    "InventoryAlert",
+    "NotificationSettings",
+    "ScheduledJobRun",
+    "EmailDeliveryLog",
+    "DailyInventorySnapshot",
     "ForecastRecord",
     "AppSetting",
 ]

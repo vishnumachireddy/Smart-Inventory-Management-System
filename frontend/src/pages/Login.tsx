@@ -123,10 +123,17 @@ export const Login: React.FC = () => {
             </div>
           </div>
 
-          <div className="mt-4 text-center">
-            <Link to="/register" className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-              Need a new shop registration? Click here
-            </Link>
+          <div className="mt-4 text-center space-y-2">
+            <div>
+              <Link to="/register" className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">
+                Need a new shop registration? Click here
+              </Link>
+            </div>
+            <div>
+              <Link to="/home" className="text-xs text-slate-500 hover:text-slate-800 font-medium">
+                &larr; Back to Public Showcase &amp; Features
+              </Link>
+            </div>
           </div>
         </div>
       </div>

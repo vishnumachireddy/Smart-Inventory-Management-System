@@ -20,32 +20,46 @@ import {
   Store,
   FileSpreadsheet,
   AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useWebSocket } from '../../context/WebSocketContext';
 import { apiClient } from '../../api/client';
 
 export const AppLayout: React.FC = () => {
   const { user, logout, isOwner } = useAuth();
+  const { isConnected, liveAlertsSummary } = useWebSocket();
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadAlertsCount, setUnreadAlertsCount] = useState<number>(0);
 
+  // Sync unread alerts count instantly from WebSocket feed
   useEffect(() => {
-    // Fetch unread alerts count
-    const fetchAlertsCount = async () => {
+    if (liveAlertsSummary) {
+      const activeAlerts = (liveAlertsSummary.near_expiry_count || 0) + 
+                           (liveAlertsSummary.low_stock_count || 0) + 
+                           (liveAlertsSummary.out_of_stock_count || 0);
+      setUnreadAlertsCount(activeAlerts);
+    }
+  }, [liveAlertsSummary]);
+
+  // Initial fallback load only if socket did not deliver summary within 2s
+  useEffect(() => {
+    if (liveAlertsSummary) return;
+    const t = setTimeout(async () => {
       try {
-        const res = await apiClient.getAlerts({ is_resolved: false });
-        const unread = res.data.filter((a) => !a.is_read).length;
-        setUnreadAlertsCount(unread);
+        const res = await apiClient.getInventorySummary();
+        const activeAlerts = (res.data.summary.near_expiry_count || 0) + 
+                             (res.data.summary.low_stock_count || 0) + 
+                             (res.data.summary.out_of_stock_count || 0);
+        setUnreadAlertsCount(activeAlerts);
       } catch {
         // Silently ignore if not authorized yet
       }
-    };
-    fetchAlertsCount();
-    const interval = setInterval(fetchAlertsCount, 30000); // 30s heartbeat
-    return () => clearInterval(interval);
-  }, []);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [liveAlertsSummary]);
 
   const navigation = [
     {
@@ -81,6 +95,7 @@ export const AppLayout: React.FC = () => {
         { name: 'Alerts Center', path: '/alerts', icon: Bell, badge: unreadAlertsCount },
         ...(isOwner ? [{ name: 'Staff Accounts', path: '/users', icon: Users }] : []),
         { name: 'Store Settings', path: '/settings', icon: Settings },
+        { name: 'Public Showcase', path: '/home', icon: Sparkles },
       ],
     },
   ];
@@ -101,6 +116,21 @@ export const AppLayout: React.FC = () => {
           <span className="font-bold text-slate-900 tracking-tight text-lg">StockSense</span>
         </div>
         <div className="flex items-center space-x-2">
+          <div
+            title={isConnected ? 'Live WebSocket Connected' : 'Connecting WebSocket...'}
+            className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+              isConnected
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+              }`}
+            ></span>
+            <span>{isConnected ? 'LIVE' : 'SYNC'}</span>
+          </div>
           <Link
             to="/alerts"
             className="relative p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100"
@@ -140,6 +170,21 @@ export const AppLayout: React.FC = () => {
               </span>
             </div>
           </Link>
+          <div
+            title={isConnected ? 'Live WebSocket Connected' : 'Connecting to real-time feed...'}
+            className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold border transition-colors ${
+              isConnected
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-amber-50 text-amber-700 border-amber-200'
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+              }`}
+            ></span>
+            <span>{isConnected ? 'LIVE' : 'SYNC'}</span>
+          </div>
         </div>
 
         {/* Quick Action POS Button */}

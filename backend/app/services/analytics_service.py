@@ -1,7 +1,7 @@
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc
 
 from app.models import Product, InventoryBatch, Sale, SaleItem, Category, Alert
@@ -14,6 +14,7 @@ from app.schemas import (
 )
 from app.core.config import settings
 from app.services.alert_service import AlertService
+from app.services.cache_service import data_cache
 
 
 class AnalyticsService:
@@ -22,14 +23,22 @@ class AnalyticsService:
     def get_dashboard_summary(
         db: Session,
         current_date: Optional[date] = None,
-        period_days: int = 30
+        period_days: int = 30,
+        bypass_cache: bool = False
     ) -> DashboardKPISummary:
-        """Computes accurate, non-duplicative KPI metrics from primary database records."""
+        """Computes accurate, non-duplicative KPI metrics from primary database records with caching."""
+        cache_key = f"dashboard_kpis_{period_days}"
+        if not bypass_cache and current_date is None:
+            cached = data_cache.get(cache_key)
+            if cached:
+                return cached
+
         if current_date is None:
             current_date = date.today()
 
         # 1. Total Active Products
-        total_active_products = db.query(Product).filter(Product.is_active == True).count()
+        products = db.query(Product).filter(Product.is_active == True).all()
+        total_active_products = len(products)
 
         # 2. Total Eligible Units in Stock & Total Inventory Valuation
         eligible_batches = db.query(InventoryBatch).join(Product, InventoryBatch.product_id == Product.id).filter(
@@ -44,14 +53,14 @@ class AnalyticsService:
             Decimal(b.current_quantity) * Decimal(str(b.unit_cost)) for b in eligible_batches
         )
 
-        # 3. Low-Stock Products Count
-        # Product is low-stock if sum of eligible stock <= reorder_threshold
+        # 3. Low-Stock Products Count (Pre-aggregate in memory from eligible_batches)
+        stock_by_product = {}
+        for b in eligible_batches:
+            stock_by_product[b.product_id] = stock_by_product.get(b.product_id, 0.0) + b.current_quantity
+
         low_stock_count = 0
-        products = db.query(Product).filter(Product.is_active == True).all()
         for p in products:
-            p_stock = sum(
-                b.current_quantity for b in eligible_batches if b.product_id == p.id
-            )
+            p_stock = stock_by_product.get(p.id, 0.0)
             if p_stock <= p.reorder_threshold:
                 low_stock_count += 1
 
@@ -96,7 +105,7 @@ class AnalyticsService:
 
         period_gross_profit = Decimal(str(period_profit_query or 0))
 
-        return DashboardKPISummary(
+        result = DashboardKPISummary(
             total_active_products=total_active_products,
             total_eligible_units=total_eligible_units,
             low_stock_products_count=low_stock_count,
@@ -109,13 +118,23 @@ class AnalyticsService:
             currency_symbol=settings.CURRENCY_SYMBOL
         )
 
+        data_cache.set(cache_key, result, ttl_seconds=20)
+        return result
+
     @staticmethod
     def get_sales_trends(
         db: Session,
         days: int = 30,
-        end_date: Optional[date] = None
+        end_date: Optional[date] = None,
+        bypass_cache: bool = False
     ) -> List[SalesTrendPoint]:
-        """Returns daily sales trend points (revenue, cost, profit, order count)."""
+        """Returns daily sales trend points (revenue, cost, profit, order count) with caching."""
+        cache_key = f"sales_trends_{days}"
+        if not bypass_cache and end_date is None:
+            cached = data_cache.get(cache_key)
+            if cached:
+                return cached
+
         if end_date is None:
             end_date = date.today()
         start_date = end_date - timedelta(days=days)
@@ -164,61 +183,83 @@ class AnalyticsService:
             )
             cur += timedelta(days=1)
 
+        data_cache.set(cache_key, points, ttl_seconds=30)
         return points
 
     @staticmethod
-    def get_category_distribution(db: Session) -> List[CategoryStockPoint]:
-        """Calculates product counts, on-hand units, and total inventory value per category."""
+    def get_category_distribution(db: Session, bypass_cache: bool = False) -> List[CategoryStockPoint]:
+        """Calculates product counts, on-hand units, and total inventory value per category in bulk."""
+        cache_key = "category_distribution"
+        if not bypass_cache:
+            cached = data_cache.get(cache_key)
+            if cached:
+                return cached
+
         categories = db.query(Category).all()
+        cat_map = {c.id: c.name for c in categories}
+
+        # Bulk fetch all active products
+        active_products = db.query(Product.id, Product.category_id).filter(Product.is_active == True).all()
+        prod_cat_map = {p.id: p.category_id for p in active_products}
+
+        # Count products per category
+        prod_counts: Dict[Optional[int], int] = {}
+        for p in active_products:
+            prod_counts[p.category_id] = prod_counts.get(p.category_id, 0) + 1
+
+        # Bulk fetch all active batches in ONE single query
+        active_batches = db.query(
+            InventoryBatch.product_id,
+            InventoryBatch.current_quantity,
+            InventoryBatch.unit_cost
+        ).filter(
+            InventoryBatch.current_quantity > 0,
+            InventoryBatch.status == "active"
+        ).all()
+
+        # Aggregate units and values per category in memory
+        cat_units: Dict[Optional[int], float] = {}
+        cat_values: Dict[Optional[int], float] = {}
+
+        for b in active_batches:
+            cat_id = prod_cat_map.get(b.product_id)
+            cat_units[cat_id] = cat_units.get(cat_id, 0.0) + b.current_quantity
+            cat_values[cat_id] = cat_values.get(cat_id, 0.0) + (float(b.current_quantity) * float(b.unit_cost))
+
         result: List[CategoryStockPoint] = []
-
         for cat in categories:
-            prods = db.query(Product).filter(Product.category_id == cat.id, Product.is_active == True).all()
-            prod_ids = [p.id for p in prods]
-            
-            batches = db.query(InventoryBatch).filter(
-                InventoryBatch.product_id.in_(prod_ids),
-                InventoryBatch.current_quantity > 0,
-                InventoryBatch.status == "active"
-            ).all() if prod_ids else []
-
-            total_units = sum(b.current_quantity for b in batches)
-            value = sum(float(b.current_quantity) * float(b.unit_cost) for b in batches)
-
             result.append(
                 CategoryStockPoint(
                     category_name=cat.name,
-                    product_count=len(prods),
-                    total_units=total_units,
-                    inventory_value=round(value, 2)
+                    product_count=prod_counts.get(cat.id, 0),
+                    total_units=cat_units.get(cat.id, 0.0),
+                    inventory_value=round(cat_values.get(cat.id, 0.0), 2)
                 )
             )
 
-        # Include unassigned products if any
-        unassigned_prods = db.query(Product).filter(Product.category_id == None, Product.is_active == True).all()
-        if unassigned_prods:
-            unassigned_ids = [p.id for p in unassigned_prods]
-            unassigned_batches = db.query(InventoryBatch).filter(
-                InventoryBatch.product_id.in_(unassigned_ids),
-                InventoryBatch.current_quantity > 0,
-                InventoryBatch.status == "active"
-            ).all()
-            total_units = sum(b.current_quantity for b in unassigned_batches)
-            value = sum(float(b.current_quantity) * float(b.unit_cost) for b in unassigned_batches)
+        # Include unassigned if any
+        if None in prod_counts:
             result.append(
                 CategoryStockPoint(
                     category_name="General / Uncategorized",
-                    product_count=len(unassigned_prods),
-                    total_units=total_units,
-                    inventory_value=round(value, 2)
+                    product_count=prod_counts.get(None, 0),
+                    total_units=cat_units.get(None, 0.0),
+                    inventory_value=round(cat_values.get(None, 0.0), 2)
                 )
             )
 
+        data_cache.set(cache_key, result, ttl_seconds=30)
         return result
 
     @staticmethod
-    def get_top_selling_products(db: Session, limit: int = 10, days: int = 30) -> List[TopProductPoint]:
-        """Returns top products ranked by sales quantity over the past N days."""
+    def get_top_selling_products(db: Session, limit: int = 10, days: int = 30, bypass_cache: bool = False) -> List[TopProductPoint]:
+        """Returns top products ranked by sales quantity over the past N days with caching."""
+        cache_key = f"top_products_{days}_{limit}"
+        if not bypass_cache:
+            cached = data_cache.get(cache_key)
+            if cached:
+                return cached
+
         cutoff = date.today() - timedelta(days=days)
 
         query = (
@@ -242,7 +283,7 @@ class AnalyticsService:
             .all()
         )
 
-        return [
+        result = [
             TopProductPoint(
                 product_id=r.product_id,
                 product_name=r.product_name,
@@ -254,16 +295,25 @@ class AnalyticsService:
             for r in query
         ]
 
+        data_cache.set(cache_key, result, ttl_seconds=30)
+        return result
+
     @staticmethod
-    def get_expiry_risk_summary(db: Session) -> List[ExpiryRiskItem]:
-        """Returns batches that are expired or expiring within warning window."""
+    def get_expiry_risk_summary(db: Session, bypass_cache: bool = False) -> List[ExpiryRiskItem]:
+        """Returns batches that are expired or expiring within warning window, eager-loading products."""
+        cache_key = "expiry_risk_summary"
+        if not bypass_cache:
+            cached = data_cache.get(cache_key)
+            if cached:
+                return cached
+
         today = date.today()
         near_expiry_days = AlertService.get_configured_near_expiry_days(db)
         cutoff = today + timedelta(days=near_expiry_days)
 
         batches = (
             db.query(InventoryBatch)
-            .join(Product, InventoryBatch.product_id == Product.id)
+            .options(joinedload(InventoryBatch.product))
             .filter(
                 InventoryBatch.current_quantity > 0,
                 InventoryBatch.expiry_date != None,
@@ -279,12 +329,14 @@ class AnalyticsService:
             results.append(
                 ExpiryRiskItem(
                     batch_id=b.id,
-                    product_name=b.product.name,
-                    sku=b.product.sku,
+                    product_name=b.product.name if b.product else "Unknown",
+                    sku=b.product.sku if b.product else "N/A",
                     batch_number=b.batch_number,
                     remaining_quantity=b.current_quantity,
                     expiry_date=str(b.expiry_date),
                     status=status
                 )
             )
+
+        data_cache.set(cache_key, results, ttl_seconds=20)
         return results

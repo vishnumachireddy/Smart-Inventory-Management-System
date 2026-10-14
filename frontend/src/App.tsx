@@ -1,7 +1,9 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { WebSocketProvider } from './context/WebSocketContext';
 import { AppLayout } from './components/layout/AppLayout';
+import { HomePage } from './pages/HomePage';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { Dashboard } from './pages/Dashboard';
@@ -39,43 +41,46 @@ const PrivateRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Public Auth Routes */}
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+      <WebSocketProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Public Showcase & Auth Routes */}
+            <Route path="/home" element={<HomePage />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
 
-          {/* Protected Application Routes */}
-          <Route
-            path="/"
-            element={
-              <PrivateRoute>
-                <AppLayout />
-              </PrivateRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="products" element={<Products />} />
-            <Route path="products/:id" element={<ProductDetail />} />
-            <Route path="batches" element={<Batches />} />
-            <Route path="expiry" element={<ExpiryTracker />} />
-            <Route path="movements" element={<Movements />} />
-            <Route path="pos" element={<PosSale />} />
-            <Route path="sales" element={<Sales />} />
-            <Route path="purchases" element={<Purchases />} />
-            <Route path="suppliers" element={<Suppliers />} />
-            <Route path="forecasting" element={<Forecasting />} />
-            <Route path="recommendations" element={<ReorderRecommendations />} />
-            <Route path="alerts" element={<Alerts />} />
-            <Route path="analytics" element={<AnalyticsReports />} />
-            <Route path="users" element={<UsersManagement />} />
-            <Route path="settings" element={<SettingsPage />} />
-          </Route>
+            {/* Protected Application Routes */}
+            <Route
+              path="/"
+              element={
+                <PrivateRoute>
+                  <AppLayout />
+                </PrivateRoute>
+              }
+            >
+              <Route index element={<Dashboard />} />
+              <Route path="products" element={<Products />} />
+              <Route path="products/:id" element={<ProductDetail />} />
+              <Route path="batches" element={<Batches />} />
+              <Route path="expiry" element={<ExpiryTracker />} />
+              <Route path="movements" element={<Movements />} />
+              <Route path="pos" element={<PosSale />} />
+              <Route path="sales" element={<Sales />} />
+              <Route path="purchases" element={<Purchases />} />
+              <Route path="suppliers" element={<Suppliers />} />
+              <Route path="forecasting" element={<Forecasting />} />
+              <Route path="recommendations" element={<ReorderRecommendations />} />
+              <Route path="alerts" element={<Alerts />} />
+              <Route path="analytics" element={<AnalyticsReports />} />
+              <Route path="users" element={<UsersManagement />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
 
-          {/* Catch-all */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+            {/* Catch-all */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </WebSocketProvider>
     </AuthProvider>
   );
 };

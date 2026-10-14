@@ -31,7 +31,7 @@ def get_effective_database_url() -> str:
             "DATABASE_URL=postgresql+psycopg://USER:PASSWORD@ep-xyz-123456.us-east-2.aws.neon.tech/neondb?sslmode=require\n"
             "="*80 + "\n"
         )
-    return settings.DATABASE_URL
+    return settings.get_database_url()
 
 
 def create_db_engine():
@@ -42,10 +42,16 @@ def create_db_engine():
         return create_engine(
             db_url,
             pool_pre_ping=True,     # Reconnect automatically after idle disconnects
-            pool_recycle=300,       # Recycle idle connections before serverless proxy timeout
-            pool_size=10,
-            max_overflow=20,
-            connect_args={"connect_timeout": 10}
+            pool_recycle=60,        # Recycle connections every 60s to prevent stale serverless proxy connections
+            pool_size=5,            # Keep pool lean to avoid Neon connection pooler limits
+            max_overflow=10,
+            connect_args={
+                "connect_timeout": 10,
+                "keepalives": 1,
+                "keepalives_idle": 15,
+                "keepalives_interval": 5,
+                "keepalives_count": 3,
+            }
         )
     else:
         # SQLite engine for isolated unit testing

@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from app.core.database import get_db
@@ -16,6 +16,8 @@ from app.schemas import (
 )
 from app.services.inventory_service import InventoryService
 from app.services.alert_service import AlertService
+from app.services.cache_service import data_cache
+from app.core.events import broadcast_live_event
 
 router = APIRouter()
 
@@ -84,6 +86,14 @@ def receive_inventory_batch(
         # Reconcile alerts after receiving inventory
         AlertService.reconcile_all_alerts(db)
 
+        # Broadcast live inventory event
+        broadcast_live_event("BATCH_RECEIVED", {
+            "batch_id": batch.id,
+            "product_id": batch.product_id,
+            "batch_number": batch.batch_number,
+            "quantity": batch.quantity_received
+        })
+
         today = date.today()
         days_left = (batch.expiry_date - today).days if batch.expiry_date else None
         return BatchResponse(
@@ -126,6 +136,13 @@ def adjust_batch_quantity(
 
         AlertService.reconcile_all_alerts(db)
 
+        # Broadcast live inventory event
+        broadcast_live_event("STOCK_ADJUSTED", {
+            "batch_id": batch.id,
+            "product_id": batch.product_id,
+            "current_quantity": batch.current_quantity
+        })
+
         today = date.today()
         days_left = (batch.expiry_date - today).days if batch.expiry_date else None
         return BatchResponse(
@@ -156,8 +173,12 @@ def list_stock_movements(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff_or_owner)
 ):
-    """Retrieves immutable stock movement ledger entries."""
-    query = db.query(StockMovement)
+    """Retrieves immutable stock movement ledger entries with joined relations."""
+    query = db.query(StockMovement).options(
+        joinedload(StockMovement.product),
+        joinedload(StockMovement.batch),
+        joinedload(StockMovement.user)
+    )
 
     if product_id:
         query = query.filter(StockMovement.product_id == product_id)
@@ -192,12 +213,22 @@ def get_expiry_summary(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff_or_owner)
 ):
-    """Returns grouped batches by expiry status: expired, near-expiry, healthy, and non-expiring."""
+    """Returns grouped batches by expiry status with joined products and caching."""
+    cache_key = "expiry_summary_grouped"
+    cached = data_cache.get(cache_key)
+    if cached:
+        return cached
+
     today = date.today()
     near_expiry_days = AlertService.get_configured_near_expiry_days(db)
     near_cutoff = today + timedelta(days=near_expiry_days)
 
-    batches = db.query(InventoryBatch).filter(InventoryBatch.current_quantity > 0).all()
+    batches = (
+        db.query(InventoryBatch)
+        .options(joinedload(InventoryBatch.product))
+        .filter(InventoryBatch.current_quantity > 0)
+        .all()
+    )
 
     expired = []
     near_expiry = []
@@ -226,7 +257,7 @@ def get_expiry_summary(
         else:
             healthy.append(item)
 
-    return {
+    result = {
         "expired": expired,
         "near_expiry": near_expiry,
         "healthy": healthy,
@@ -239,3 +270,5 @@ def get_expiry_summary(
             "total_active_batches": len(batches)
         }
     }
+    data_cache.set(cache_key, result, ttl_seconds=30)
+    return result

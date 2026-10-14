@@ -12,7 +12,9 @@ import {
   ArrowUpRight,
   Download,
   RefreshCw,
+  Bell,
 } from 'lucide-react';
+import { LoginAlertModal } from '../components/alerts/LoginAlertModal';
 import {
   ResponsiveContainer,
   AreaChart,
@@ -29,6 +31,7 @@ import {
   Cell,
 } from 'recharts';
 import { apiClient } from '../api/client';
+import { useWebSocket } from '../context/WebSocketContext';
 import {
   DashboardKPIs,
   SalesTrendPoint,
@@ -42,30 +45,45 @@ const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { isConnected, liveKpis, requestKpis, lastEvent } = useWebSocket();
   const [loading, setLoading] = useState(true);
-  const [kpis, setKpis] = useState<DashboardKPIs | null>(null);
+  const [kpis, setKpis] = useState<DashboardKPIs | null>(liveKpis);
   const [trends, setTrends] = useState<SalesTrendPoint[]>([]);
   const [categories, setCategories] = useState<CategoryStockPoint[]>([]);
   const [topProducts, setTopProducts] = useState<TopProductPoint[]>([]);
   const [expiryRisk, setExpiryRisk] = useState<ExpiryRiskItem[]>([]);
   const [trendDays, setTrendDays] = useState<number>(30);
+  const [isAlertModalOpen, setIsAlertModalOpen] = useState<boolean>(false);
+  const [liveNotice, setLiveNotice] = useState<string | null>(null);
 
-  const fetchDashboardData = async () => {
-    setLoading(true);
+  // Instantly adopt live KPIs as soon as WebSocket receives them
+  useEffect(() => {
+    if (liveKpis) {
+      setKpis(liveKpis);
+      setLoading(false);
+    }
+  }, [liveKpis]);
+
+  useEffect(() => {
+    // Automatically trigger on first authenticated dashboard entry per session
+    const seenInSession = sessionStorage.getItem('stocksense_login_alert_modal_seen');
+    if (!seenInSession) {
+      setIsAlertModalOpen(true);
+      sessionStorage.setItem('stocksense_login_alert_modal_seen', 'true');
+    }
+  }, []);
+
+  const fetchDashboardData = async (silent = false) => {
+    if (!silent && !kpis) setLoading(true);
     try {
-      const [kpiRes, trendRes, catRes, topRes, expRes] = await Promise.all([
-        apiClient.getDashboardSummary(),
-        apiClient.getSalesAnalytics(trendDays),
-        apiClient.getCategoryAnalytics(),
-        apiClient.getTopProductsAnalytics(30, 5),
-        apiClient.getExpiryRiskAnalytics(),
-      ]);
+      const bundleRes = await apiClient.getDashboardBundle(trendDays);
+      const data = bundleRes.data;
 
-      setKpis(kpiRes.data);
-      setTrends(trendRes.data);
-      setCategories(catRes.data);
-      setTopProducts(topRes.data);
-      setExpiryRisk(expRes.data);
+      setKpis(data.kpis);
+      setTrends(data.trends);
+      setCategories(data.categories);
+      setTopProducts(data.top_products);
+      setExpiryRisk(data.expiry_risk);
     } catch (err) {
       console.error('Failed to load dashboard metrics:', err);
     } finally {
@@ -76,6 +94,22 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     fetchDashboardData();
   }, [trendDays]);
+
+  // React to live real-time WebSocket events from other clients or POS
+  useEffect(() => {
+    if (!lastEvent) return;
+    if (
+      lastEvent.type === 'SALE_COMPLETED' ||
+      lastEvent.type === 'BATCH_RECEIVED' ||
+      lastEvent.type === 'STOCK_ADJUSTED' ||
+      lastEvent.type === 'SALE_CANCELLED'
+    ) {
+      setLiveNotice(`Live event: ${lastEvent.type.replace('_', ' ')}`);
+      fetchDashboardData(true); // Silent background refresh
+      const t = setTimeout(() => setLiveNotice(null), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [lastEvent]);
 
   const handleExportCsv = async (type: string) => {
     try {
@@ -103,18 +137,51 @@ export const Dashboard: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Executive Dashboard</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Executive Dashboard</h1>
+            <div
+              title={isConnected ? 'Connected to live WebSocket feed' : 'Connecting WebSocket...'}
+              className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-all ${
+                isConnected
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-amber-50 text-amber-700 border-amber-200'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-400'
+                }`}
+              ></span>
+              <span>{isConnected ? 'Live WebSocket Feed' : 'Connecting WS...'}</span>
+            </div>
+            {liveNotice && (
+              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-100 text-indigo-800 animate-bounce">
+                ⚡ {liveNotice}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-500 mt-1">
-            Real-time batch inventory, FEFO movement metrics, and demand performance
+            Real-time batch inventory, FEFO movement metrics, and instant WebSocket demand synchronization
           </p>
         </div>
         <div className="flex items-center space-x-2">
           <button
-            onClick={() => fetchDashboardData()}
+            onClick={() => setIsAlertModalOpen(true)}
+            className="flex items-center space-x-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-semibold shadow-sm transition-colors"
+          >
+            <Bell className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+            <span>Review Alerts</span>
+          </button>
+          <button
+            onClick={() => {
+              requestKpis();
+              fetchDashboardData();
+            }}
+            title="Instant WebSocket & DB Sync"
             className="flex items-center space-x-1.5 px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium shadow-sm transition-colors"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Sync</span>
+            <RefreshCw className="w-3.5 h-3.5 text-indigo-600" />
+            <span>Live Sync</span>
           </button>
           <button
             onClick={() => handleExportCsv('sales')}
@@ -372,6 +439,16 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Login Alert Modal Dialog */}
+      <LoginAlertModal
+        isOpen={isAlertModalOpen}
+        onClose={() => setIsAlertModalOpen(false)}
+        onRemindLater={() => {
+          setIsAlertModalOpen(false);
+          sessionStorage.removeItem('stocksense_login_alert_modal_seen');
+        }}
+      />
     </div>
   );
 };

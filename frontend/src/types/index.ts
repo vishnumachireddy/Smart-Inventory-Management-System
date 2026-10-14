@@ -147,7 +147,7 @@ export interface Alert {
   id: number;
   product_id: number;
   batch_id?: number;
-  alert_type: 'low_stock' | 'near_expiry' | 'expired';
+  alert_type: 'low_stock' | 'near_expiry' | 'expired' | 'out_of_stock';
   severity: 'info' | 'warning' | 'critical';
   message: string;
   is_read: boolean;
@@ -159,6 +159,10 @@ export interface Alert {
   batch_number?: string;
   current_stock?: number;
   expiry_date?: string;
+  status?: string;
+  deduplication_key?: string;
+  relevant_stock_quantity?: number;
+  relevant_expiry_date?: string;
 }
 
 export interface ForecastPoint {
@@ -234,6 +238,20 @@ export interface TopProductPoint {
   profit: number;
 }
 
+export interface DashboardBundleResponse {
+  kpis: DashboardKPIs;
+  trends: SalesTrendPoint[];
+  categories: CategoryStockPoint[];
+  top_products: TopProductPoint[];
+  expiry_risk: ExpiryRiskItem[];
+}
+
+export interface WebSocketLiveMessage {
+  type: string;
+  timestamp?: string;
+  data?: any;
+}
+
 export interface AppSetting {
   id: number;
   key: string;
@@ -250,4 +268,111 @@ export interface ExpiryRiskItem {
   remaining_quantity: number;
   expiry_date: string;
   status: 'expired' | 'near_expiry';
+}
+
+// --- Smart Login Alerts & Notifications Types ---
+export interface NearExpiryAlertItem {
+  id: string;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  batch_id: number;
+  batch_number: string;
+  remaining_quantity: number;
+  expiry_date: string;
+  days_until_expiry: number;
+  severity: 'warning' | 'critical';
+  recommended_action: string;
+}
+
+export interface LowStockAlertItem {
+  id: string;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  current_stock: number;
+  reorder_threshold: number;
+  avg_daily_demand: number;
+  suggested_reorder_qty: number;
+  severity: 'warning' | 'critical';
+  recommended_action: string;
+}
+
+export interface OutOfStockAlertItem {
+  id: string;
+  product_id: number;
+  product_name: string;
+  sku: string;
+  available_quantity: 0;
+  reorder_threshold?: number;
+  last_stock_movement: string;
+  severity: 'critical';
+  recommended_action: string;
+}
+
+export interface InventorySummaryResponse {
+  generated_at: string;
+  timezone: string;
+  warning_window_days: number;
+  summary: {
+    near_expiry_count: number;
+    low_stock_count: number;
+    out_of_stock_count: number;
+    expired_count?: number;
+  };
+  near_expiry: NearExpiryAlertItem[];
+  low_stock: LowStockAlertItem[];
+  out_of_stock: OutOfStockAlertItem[];
+  expired?: any[];
+}
+
+export interface NotificationSettings {
+  id: number;
+  shop_id: string;
+  recipient_emails: string;
+  enabled: boolean;
+  report_frequency: 'daily' | 'weekly' | 'both';
+  scheduled_time: string;
+  timezone: string;
+  categories: string;
+  include_empty_reports: boolean;
+  updated_at: string;
+}
+
+export interface EmailDeliveryLog {
+  id: number;
+  report_type: string;
+  recipient: string;
+  status: 'queued' | 'attempted' | 'accepted' | 'failed' | 'disabled';
+  attempt_count: number;
+  provider_message_id?: string;
+  last_attempt_at: string;
+  accepted_at?: string;
+  failure_reason?: string;
+  created_at: string;
+}
+
+export interface ScheduledJobRun {
+  id: number;
+  job_name: string;
+  scheduled_at: string;
+  started_at: string;
+  finished_at?: string;
+  status: 'running' | 'success' | 'failed' | 'skipped';
+  summary_counts?: string;
+  error_details?: string;
+}
+
+export interface DailySnapshot {
+  id: number;
+  reporting_date: string;
+  near_expiry_count: number;
+  low_stock_count: number;
+  out_of_stock_count: number;
+  total_stock_value: number;
+  sales_count: number;
+  revenue: number;
+  gross_profit: number;
+  summary_text?: string;
+  generation_timestamp: string;
 }
