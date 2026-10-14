@@ -1,0 +1,34 @@
+# Re-export Base and all models for Alembic autogenerate
+from app.core.database import Base
+from app.models import (
+    User,
+    Category,
+    Supplier,
+    Product,
+    InventoryBatch,
+    StockMovement,
+    Sale,
+    SaleItem,
+    PurchaseReceipt,
+    PurchaseReceiptItem,
+    Alert,
+    ForecastRecord,
+    AppSetting,
+)
+
+__all__ = [
+    "Base",
+    "User",
+    "Category",
+    "Supplier",
+    "Product",
+    "InventoryBatch",
+    "StockMovement",
+    "Sale",
+    "SaleItem",
+    "PurchaseReceipt",
+    "PurchaseReceiptItem",
+    "Alert",
+    "ForecastRecord",
+    "AppSetting",
+]
